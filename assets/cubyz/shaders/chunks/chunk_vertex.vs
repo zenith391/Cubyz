@@ -98,10 +98,14 @@ void main() {
 	vec3 modelPosition = vec3(chunks[chunkID].position.xyz - playerPositionInteger) - playerPositionFraction;
 	int encodedPosition = faceData[faceID].encodedPosition;
 	int textureAndQuad = faceData[faceID].textureAndQuad;
+	uvec2 quadSize = uvec2(
+		encodedPosition >> 15 & 31,
+		encodedPosition >> 20 & 31
+	);
 	lightBufferIndex = (transparent ? chunks[chunkID].lightStartTransparent : chunks[chunkID].lightStartOpaque) + faceData[faceID].lightBufferIndex;
-	lightArea = uvec2(2, 2);
+	lightArea = quadSize + uvec2(1, 1);
 	lightPosition = vec2(vertexID >> 1, vertexID & 1);
-	isBackFace = encodedPosition>>19 & 1;
+	isBackFace = encodedPosition>>31 & 1;
 	ditherSeed = encodedPosition & 15;
 
 	textureIndex = textureAndQuad & 65535;
@@ -120,7 +124,17 @@ void main() {
 
 	normal = quads[quadIndex].normal;
 	
-	position += quads[quadIndex].corners[vertexID];
+	vec3 cornerPosition = quads[quadIndex].corners[0];
+	vec2 uvCornerPosition = quads[quadIndex].cornerUV[0];
+	if((vertexID & 2) != 0) {
+		cornerPosition += (quads[quadIndex].corners[2] - quads[quadIndex].corners[0])*quadSize.x;
+		uvCornerPosition += (quads[quadIndex].cornerUV[2] - quads[quadIndex].cornerUV[0])*quadSize.x;
+	}
+	if((vertexID & 1) != 0) {
+		cornerPosition += (quads[quadIndex].corners[vertexID] - quads[quadIndex].corners[vertexID & 2])*quadSize.y;
+		uvCornerPosition += (quads[quadIndex].cornerUV[vertexID] - quads[quadIndex].cornerUV[vertexID & 2])*quadSize.y;
+	}
+	position += cornerPosition;
 	position *= voxelSize;
 	position += modelPosition;
 
@@ -129,5 +143,5 @@ void main() {
 	vec4 mvPos = viewMatrix*vec4(position, 1);
 	gl_Position = projectionMatrix*mvPos;
 	mvVertexPos = mvPos.xyz;
-	uv = quads[quadIndex].cornerUV[vertexID]*voxelSize;
+	uv = uvCornerPosition*voxelSize;
 }

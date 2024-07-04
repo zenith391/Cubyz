@@ -244,9 +244,10 @@ pub const FaceData = extern struct {
 		x: u5,
 		y: u5,
 		z: u5,
-		padding: u4 = 0,
+		xSize: u5,
+		ySize: u5,
+		padding: u6 = 0,
 		isBackFace: bool,
-		padding2: u12 = 0,
 	},
 	blockAndQuad: packed struct(u32) {
 		texture: u16,
@@ -256,7 +257,7 @@ pub const FaceData = extern struct {
 
 	pub inline fn init(texture: u16, quadIndex: u16, x: i32, y: i32, z: i32, comptime backFace: bool) FaceData {
 		return FaceData {
-			.position = .{.x = @intCast(x), .y = @intCast(y), .z = @intCast(z), .isBackFace = backFace},
+			.position = .{.x = @intCast(x), .y = @intCast(y), .z = @intCast(z), .xSize = 1, .ySize = 1, .isBackFace = backFace},
 			.blockAndQuad = .{.texture = texture, .quadIndex = quadIndex},
 			.lightBufferIndex = undefined,
 		};
