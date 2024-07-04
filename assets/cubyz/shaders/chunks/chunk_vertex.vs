@@ -14,15 +14,20 @@ uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
 uniform ivec3 playerPositionInteger;
 uniform vec3 playerPositionFraction;
+uniform bool transparent; // TODO: Make this a macro constant
 
 struct FaceData {
 	int encodedPosition;
 	int textureAndQuad;
-	int light[4];
+	uint lightBufferIndex;
 };
 layout(std430, binding = 3) buffer _faceData
 {
 	FaceData faceData[];
+};
+layout(std430, binding = 10) buffer _lightData
+{
+	uint lightData[];
 };
 
 struct QuadInfo {
@@ -44,8 +49,10 @@ struct ChunkData {
 	int visibilityMask;
 	int voxelSize;
 	uint vertexStartOpaque;
+	uint lightStartOpaque;
 	uint faceCountsByNormalOpaque[7];
 	uint vertexStartTransparent;
+	uint lightStartTransparent;
 	uint vertexCountTransparent;
 	uint visibilityState;
 	uint oldVisibilityState;
@@ -90,16 +97,17 @@ void main() {
 	vec3 modelPosition = vec3(chunks[chunkID].position.xyz - playerPositionInteger) - playerPositionFraction;
 	int encodedPosition = faceData[faceID].encodedPosition;
 	int textureAndQuad = faceData[faceID].textureAndQuad;
-	int fullLight = faceData[faceID].light[vertexID];
+	uint fullLight = lightData[(transparent ? chunks[chunkID].lightStartTransparent : chunks[chunkID].lightStartOpaque) + faceData[faceID].lightBufferIndex + vertexID];
+//	int fullLight = faceData[faceID].light[vertexID];
 	vec3 sunLight = vec3(
-		fullLight >> 25 & 31,
-		fullLight >> 20 & 31,
-		fullLight >> 15 & 31
+		fullLight >> 25 & 31u,
+		fullLight >> 20 & 31u,
+		fullLight >> 15 & 31u
 	);
 	vec3 blockLight = vec3(
-		fullLight >> 10 & 31,
-		fullLight >> 5 & 31,
-		fullLight >> 0 & 31
+		fullLight >> 10 & 31u,
+		fullLight >> 5 & 31u,
+		fullLight >> 0 & 31u
 	);
 	light = max(sunLight*ambientLight, blockLight)/31;
 	isBackFace = encodedPosition>>19 & 1;

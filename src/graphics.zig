@@ -1997,7 +1997,7 @@ pub fn generateBlockTexture(blockType: u16) Texture {
 	}
 
 	for(faceData.items) |*face| {
-		@memset(&face.light, ~@as(u32, 0));
+		face.lightBufferIndex = 0;
 	}
 	var allocation: SubAllocation = .{.start = 0, .len = 0};
 	main.renderer.chunk_meshing.faceBuffer.uploadData(faceData.items, &allocation);
@@ -2018,8 +2018,10 @@ pub fn generateBlockTexture(blockType: u16) Texture {
 			.visibilityMask = 255,
 			.voxelSize = 1,
 			.vertexStartOpaque = undefined,
+			.lightStartOpaque = undefined,
 			.faceCountsByNormalOpaque = undefined,
 			.vertexStartTransparent = undefined,
+			.lightStartTransparent = undefined,
 			.vertexCountTransparent = undefined,
 			.visibilityState = 0,
 			.oldVisibilityState = 0,

@@ -43,6 +43,7 @@ const UniformStruct = struct {
 	reflectionMapSize: c_int,
 	zNear: c_int,
 	zFar: c_int,
+	transparent: c_int,
 };
 pub var uniforms: UniformStruct = undefined;
 pub var transparentUniforms: UniformStruct = undefined;
@@ -66,6 +67,7 @@ var vao: c_uint = undefined;
 var vbo: c_uint = undefined;
 var faces: main.List(u32) = undefined;
 pub var faceBuffer: graphics.LargeBuffer(FaceData) = undefined;
+pub var lightBuffer: graphics.LargeBuffer(u32) = undefined;
 pub var chunkBuffer: graphics.LargeBuffer(ChunkData) = undefined;
 pub var commandBuffer: graphics.LargeBuffer(IndirectData) = undefined;
 pub var chunkIDBuffer: graphics.LargeBuffer(u32) = undefined;
@@ -94,6 +96,7 @@ pub fn init() void {
 
 	faces = main.List(u32).initCapacity(main.globalAllocator, 65536); // TODO: What is this used for?
 	faceBuffer.init(main.globalAllocator, 1 << 20, 3);
+	lightBuffer.init(main.globalAllocator, 1 << 20, 10);
 	chunkBuffer.init(main.globalAllocator, 1 << 20, 6);
 	commandBuffer.init(main.globalAllocator, 1 << 20, 8);
 	chunkIDBuffer.init(main.globalAllocator, 1 << 20, 9);
@@ -108,6 +111,7 @@ pub fn deinit() void {
 	c.glDeleteBuffers(1, &vbo);
 	faces.deinit();
 	faceBuffer.deinit();
+	lightBuffer.deinit();
 	chunkBuffer.deinit();
 	commandBuffer.deinit();
 	chunkIDBuffer.deinit();
@@ -115,6 +119,7 @@ pub fn deinit() void {
 
 pub fn beginRender() void {
 	faceBuffer.beginRender();
+	lightBuffer.beginRender();
 	chunkBuffer.beginRender();
 	commandBuffer.beginRender();
 	chunkIDBuffer.beginRender();
@@ -122,6 +127,7 @@ pub fn beginRender() void {
 
 pub fn endRender() void {
 	faceBuffer.endRender();
+	lightBuffer.endRender();
 	chunkBuffer.endRender();
 	commandBuffer.endRender();
 	chunkIDBuffer.endRender();
@@ -153,6 +159,7 @@ pub fn bindShaderAndUniforms(projMatrix: Mat4f, ambient: Vec3f, playerPos: Vec3d
 	shader.bind();
 
 	bindCommonUniforms(&uniforms, projMatrix, ambient, playerPos);
+	c.glUniform1i(uniforms.transparent, 0);
 
 	c.glBindVertexArray(vao);
 }
@@ -162,6 +169,7 @@ pub fn bindTransparentShaderAndUniforms(projMatrix: Mat4f, ambient: Vec3f, playe
 
 	c.glUniform3fv(transparentUniforms.@"fog.color", 1, @ptrCast(&game.fog.skyColor));
 	c.glUniform1f(transparentUniforms.@"fog.density", game.fog.density);
+	c.glUniform1i(uniforms.transparent, 1);
 
 	bindCommonUniforms(&transparentUniforms, projMatrix, ambient, playerPos);
 
@@ -244,12 +252,13 @@ pub const FaceData = extern struct {
 		texture: u16,
 		quadIndex: u16,
 	},
-	light: [4]u32 = .{0, 0, 0, 0},
+	lightBufferIndex: u32,
 
 	pub inline fn init(texture: u16, quadIndex: u16, x: i32, y: i32, z: i32, comptime backFace: bool) FaceData {
 		return FaceData {
 			.position = .{.x = @intCast(x), .y = @intCast(y), .z = @intCast(z), .isBackFace = backFace},
 			.blockAndQuad = .{.texture = texture, .quadIndex = quadIndex},
+			.lightBufferIndex = undefined,
 		};
 	}
 };
@@ -261,8 +270,10 @@ pub const ChunkData = extern struct {
 	visibilityMask: i32,
 	voxelSize: i32,
 	vertexStartOpaque: u32,
+	lightStartOpaque: u32,
 	faceCountsByNormalOpaque: [7]u32,
 	vertexStartTransparent: u32,
+	lightStartTransparent: u32,
 	vertexCountTransparent: u32,
 	visibilityState: u32,
 	oldVisibilityState: u32,
@@ -281,11 +292,13 @@ const PrimitiveMesh = struct {
 	neighborFacesSameLod: [6]main.ListUnmanaged(FaceData) = [_]main.ListUnmanaged(FaceData){.{}} ** 6,
 	neighborFacesHigherLod: [6]main.ListUnmanaged(FaceData) = [_]main.ListUnmanaged(FaceData){.{}} ** 6,
 	completeList: []FaceData = &.{},
+	completeLightList: []u32 = &.{},
 	coreLen: u32 = 0,
 	sameLodLens: [6]u32 = .{0} ** 6,
 	higherLodLens: [6]u32 = .{0} ** 6,
 	mutex: std.Thread.Mutex = .{},
 	bufferAllocation: graphics.SubAllocation = .{.start = 0, .len = 0},
+	lightBufferAllocation: graphics.SubAllocation = .{.start = 0, .len = 0},
 	vertexCount: u31 = 0,
 	byNormalCount: [7]u32 = .{0} ** 7,
 	wasChanged: bool = false,
@@ -294,6 +307,7 @@ const PrimitiveMesh = struct {
 
 	fn deinit(self: *PrimitiveMesh) void {
 		faceBuffer.free(self.bufferAllocation);
+		lightBuffer.free(self.lightBufferAllocation);
 		self.coreFaces.deinit(main.globalAllocator);
 		for(&self.neighborFacesSameLod) |*neighborFaces| {
 			neighborFaces.deinit(main.globalAllocator);
@@ -302,6 +316,7 @@ const PrimitiveMesh = struct {
 			neighborFaces.deinit(main.globalAllocator);
 		}
 		main.globalAllocator.free(self.completeList);
+		main.globalAllocator.free(self.completeLightList);
 	}
 
 	fn reset(self: *PrimitiveMesh) void {
@@ -368,8 +383,12 @@ const PrimitiveMesh = struct {
 
 		parent.lightingData[0].lock.lockRead();
 		parent.lightingData[1].lock.lockRead();
+		const completeLightList = main.globalAllocator.alloc(u32, 4*len);
+		var lightBufferIndex: u32 = 0;
 		for(completeList) |*face| {
-			face.light = getLight(parent, .{face.position.x, face.position.y, face.position.z}, face.blockAndQuad.quadIndex);
+			completeLightList[lightBufferIndex..][0..4].* = getLight(parent, .{face.position.x, face.position.y, face.position.z}, face.blockAndQuad.quadIndex);
+			face.lightBufferIndex = lightBufferIndex;
+			lightBufferIndex += 4;
 			const basePos: Vec3f = .{
 				@floatFromInt(face.position.x),
 				@floatFromInt(face.position.y),
@@ -386,6 +405,8 @@ const PrimitiveMesh = struct {
 		self.mutex.lock();
 		const oldList = self.completeList;
 		self.completeList = completeList;
+		const oldLightList = self.completeLightList;
+		self.completeLightList = completeLightList;
 		self.coreLen = @intCast(self.coreFaces.items.len);
 		for(self.neighborFacesSameLod, 0..) |neighborFaces, j| {
 			self.sameLodLens[j] = @intCast(neighborFaces.items.len);
@@ -395,6 +416,7 @@ const PrimitiveMesh = struct {
 		}
 		self.mutex.unlock();
 		main.globalAllocator.free(oldList);
+		main.globalAllocator.free(oldLightList);
 	}
 
 	fn getValues(mesh: *ChunkMesh, wx: i32, wy: i32, wz: i32) [6]u8 {
@@ -576,6 +598,7 @@ const PrimitiveMesh = struct {
 		}
 		const fullBuffer = faceBuffer.allocateAndMapRange(len, &self.bufferAllocation);
 		defer faceBuffer.unmapRange(fullBuffer);
+		lightBuffer.uploadData(self.completeLightList, &self.lightBufferAllocation);
 		// Sort the faces by normal to allow for backface culling on the GPU:
 		var i: u32 = 0;
 		var iStart = i;
@@ -1410,8 +1433,10 @@ pub const ChunkMesh = struct {
 			.voxelSize = self.pos.voxelSize,
 			.visibilityMask = self.visibilityMask,
 			.vertexStartOpaque = self.opaqueMesh.bufferAllocation.start*4,
+			.lightStartOpaque = self.opaqueMesh.lightBufferAllocation.start,
 			.faceCountsByNormalOpaque = self.opaqueMesh.byNormalCount,
 			.vertexStartTransparent = self.transparentMesh.bufferAllocation.start*4,
+			.lightStartTransparent = self.transparentMesh.lightBufferAllocation.start,
 			.vertexCountTransparent = self.transparentMesh.bufferAllocation.len*6,
 			.min = self.min,
 			.max = self.max,
