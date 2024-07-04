@@ -2,12 +2,14 @@
 
 in vec3 mvVertexPos;
 in vec3 direction;
-in vec3 light;
 in vec2 uv;
 flat in vec3 normal;
 flat in int textureIndex;
 flat in int isBackFace;
 flat in int ditherSeed;
+flat in uint lightBufferIndex;
+flat in uvec2 lightArea;
+in vec2 lightPosition;
 
 uniform sampler2DArray texture_sampler;
 uniform sampler2DArray emissionSampler;
@@ -15,6 +17,7 @@ uniform sampler2DArray reflectivityAndAbsorptionSampler;
 uniform samplerCube reflectionMap;
 uniform float reflectionMapSize;
 uniform float contrast;
+uniform vec3 ambientLight;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -31,6 +34,11 @@ struct FogData {
 layout(std430, binding = 7) buffer _fogData
 {
 	FogData fogData[];
+};
+
+layout(std430, binding = 10) buffer _lightData
+{
+	uint lightData[];
 };
 
 float lightVariation(vec3 normal) {
@@ -68,7 +76,38 @@ vec4 fixedCubeMapLookup(vec3 v) { // Taken from http://the-witness.net/news/2012
 	return texture(reflectionMap, v);
 }
 
+vec3 unpack15BitLight(uint val) {
+	return vec3(
+		val >> 10 & 31u,
+		val >> 5 & 31u,
+		val & 31u
+	);
+}
+
+vec3 readLightValue() {
+	uint x = uint(lightPosition.x);
+	uint y = uint(lightPosition.y);
+	uint light00 = lightData[lightBufferIndex + (x*lightArea.y + y)];
+	uint light01 = lightData[lightBufferIndex + (x*lightArea.y + y + 1)];
+	uint light10 = lightData[lightBufferIndex + ((x + 1)*lightArea.y + y)];
+	uint light11 = lightData[lightBufferIndex + ((x + 1)*lightArea.y + y + 1)];
+	float xFactor = lightPosition.x - x;
+	float yFactor = lightPosition.y - y;
+	vec3 sunLight = mix(
+		mix(unpack15BitLight(light00 >> 15), unpack15BitLight(light01 >> 15), yFactor),
+		mix(unpack15BitLight(light10 >> 15), unpack15BitLight(light11 >> 15), yFactor),
+		xFactor
+	);
+	vec3 blockLight = mix(
+		mix(unpack15BitLight(light00), unpack15BitLight(light01), yFactor),
+		mix(unpack15BitLight(light10), unpack15BitLight(light11), yFactor),
+		xFactor
+	);
+	return max(sunLight*ambientLight, blockLight)/31;
+}
+
 void main() {
+	vec3 light = readLightValue();
 	float animatedTextureIndex = animatedTexture[textureIndex];
 	float normalVariation = lightVariation(normal);
 	vec3 textureCoords = vec3(uv, animatedTextureIndex);

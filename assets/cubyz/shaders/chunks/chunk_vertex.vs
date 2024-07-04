@@ -2,14 +2,15 @@
 
 out vec3 mvVertexPos;
 out vec3 direction;
-out vec3 light;
 out vec2 uv;
 flat out vec3 normal;
 flat out int textureIndex;
 flat out int isBackFace;
 flat out int ditherSeed;
+flat out uint lightBufferIndex;
+flat out uvec2 lightArea;
+out vec2 lightPosition;
 
-uniform vec3 ambientLight;
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;
 uniform ivec3 playerPositionInteger;
@@ -97,19 +98,9 @@ void main() {
 	vec3 modelPosition = vec3(chunks[chunkID].position.xyz - playerPositionInteger) - playerPositionFraction;
 	int encodedPosition = faceData[faceID].encodedPosition;
 	int textureAndQuad = faceData[faceID].textureAndQuad;
-	uint fullLight = lightData[(transparent ? chunks[chunkID].lightStartTransparent : chunks[chunkID].lightStartOpaque) + faceData[faceID].lightBufferIndex + vertexID];
-//	int fullLight = faceData[faceID].light[vertexID];
-	vec3 sunLight = vec3(
-		fullLight >> 25 & 31u,
-		fullLight >> 20 & 31u,
-		fullLight >> 15 & 31u
-	);
-	vec3 blockLight = vec3(
-		fullLight >> 10 & 31u,
-		fullLight >> 5 & 31u,
-		fullLight >> 0 & 31u
-	);
-	light = max(sunLight*ambientLight, blockLight)/31;
+	lightBufferIndex = (transparent ? chunks[chunkID].lightStartTransparent : chunks[chunkID].lightStartOpaque) + faceData[faceID].lightBufferIndex;
+	lightArea = uvec2(2, 2);
+	lightPosition = vec2(vertexID >> 1, vertexID & 1);
 	isBackFace = encodedPosition>>19 & 1;
 	ditherSeed = encodedPosition & 15;
 
