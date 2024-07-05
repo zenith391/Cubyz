@@ -29,6 +29,7 @@ const ExtraQuadInfo = struct {
 	greedyMeshable: bool,
 	greedyMeshingXDir: ?u3,
 	greedyMeshingYDir: ?u3,
+	offsetByNormal: bool,
 };
 
 const gridSize = 4096;
@@ -127,11 +128,11 @@ pub const Model = struct {
 				for(&quad.corners) |*corner| {
 					corner.* -= quad.normal;
 				}
-				const quadIndex = addQuad(quad) catch continue;
+				const quadIndex = addQuad(quad, true) catch continue;
 				self.neighborFacingQuads[neighbor][indices[neighbor]] = quadIndex;
 				indices[neighbor] += 1;
 			} else {
-				const quadIndex = addQuad(quad) catch continue;
+				const quadIndex = addQuad(quad, false) catch continue;
 				self.internalQuads[internalIndex] = quadIndex;
 				internalIndex += 1;
 			}
@@ -196,21 +197,6 @@ pub const Model = struct {
 		}
 		return Model.init(quadList.items);
 	}
-
-	fn appendQuadsToList(quadList: []const u16, list: *main.ListUnmanaged(FaceData), allocator: NeverFailingAllocator, block: main.blocks.Block, x: i32, y: i32, z: i32, comptime backFace: bool) void {
-		for(quadList) |quadIndex| {
-			const texture = main.blocks.meshes.textureIndex(block, quads.items[quadIndex].textureSlot);
-			list.append(allocator, FaceData.init(texture, quadIndex, x, y, z, backFace));
-		}
-	}
-
-	pub fn appendInternalQuadsToList(self: *const Model, list: *main.ListUnmanaged(FaceData), allocator: NeverFailingAllocator, block: main.blocks.Block, x: i32, y: i32, z: i32, comptime backFace: bool) void {
-		appendQuadsToList(self.internalQuads, list, allocator, block, x, y, z, backFace);
-	}
-
-	pub fn appendNeighborFacingQuadsToList(self: *const Model, list: *main.ListUnmanaged(FaceData), allocator: NeverFailingAllocator, block: main.blocks.Block, neighbor: u3, x: i32, y: i32, z: i32, comptime backFace: bool) void {
-		appendQuadsToList(self.neighborFacingQuads[neighbor], list, allocator, block, x, y, z, backFace);
-	}
 };
 
 var nameToIndex: std.StringHashMap(u16) = undefined;
@@ -228,7 +214,7 @@ pub var models: main.List(Model) = undefined;
 pub var fullCube: u16 = undefined;
 pub const greedyMeshableQuads: u16 = 6;
 
-var quadDeduplication: std.AutoHashMap([@sizeOf(QuadInfo)]u8, u16) = undefined;
+var quadDeduplication: std.AutoHashMap([@sizeOf(QuadInfo) + 1]u8, u16) = undefined;
 
 fn getLineGreedyMeshingDir(corner0: Vec3f, corner1: Vec3f, corner0UV: Vec2f, corner1UV: Vec2f) ?u3 {
 	// One component must wrap around, while the other 2 compoenents must be equal:
@@ -258,8 +244,8 @@ fn getLineGreedyMeshingDir(corner0: Vec3f, corner1: Vec3f, corner0UV: Vec2f, cor
 	return null;
 }
 
-fn addQuad(info: QuadInfo) error{Degenerate}!u16 {
-	if(quadDeduplication.get(std.mem.toBytes(info))) |id| {
+fn addQuad(info: QuadInfo, offsetByNormal: bool) error{Degenerate}!u16 {
+	if(quadDeduplication.get(std.mem.toBytes(info) ++ .{@intFromBool(offsetByNormal)})) |id| {
 		return id;
 	}
 	// Check if it's degenerate:
@@ -272,7 +258,7 @@ fn addQuad(info: QuadInfo) error{Degenerate}!u16 {
 	if(cornerEqualities >= 2) return error.Degenerate; // One corner equality is fine, since then the quad degenerates to a triangle, which has a non-zero area.
 	const index: u16 = @intCast(quads.items.len);
 	quads.append(info);
-	quadDeduplication.put(std.mem.toBytes(info), index) catch unreachable;
+	quadDeduplication.put(std.mem.toBytes(info) ++ .{@intFromBool(offsetByNormal)}, index) catch unreachable;
 
 	var extraQuadInfo: ExtraQuadInfo = undefined;
 	extraQuadInfo.faceNeighbor = Model.getFaceNeighbor(&info);
@@ -315,6 +301,7 @@ fn addQuad(info: QuadInfo) error{Degenerate}!u16 {
 		}
 		extraQuadInfo.greedyMeshable = extraQuadInfo.greedyMeshingXDir != null or extraQuadInfo.greedyMeshingYDir != null;
 	}
+	extraQuadInfo.offsetByNormal = offsetByNormal;
 
 	extraQuadInfos.append(extraQuadInfo);
 
@@ -385,7 +372,7 @@ pub fn init() void {
 	models = main.List(Model).init(main.globalAllocator);
 	quads = main.List(QuadInfo).init(main.globalAllocator);
 	extraQuadInfos = main.List(ExtraQuadInfo).init(main.globalAllocator);
-	quadDeduplication = std.AutoHashMap([@sizeOf(QuadInfo)]u8, u16).init(main.globalAllocator.allocator);
+	quadDeduplication = std.AutoHashMap([@sizeOf(QuadInfo) + 1]u8, u16).init(main.globalAllocator.allocator);
 
 	nameToIndex = std.StringHashMap(u16).init(main.globalAllocator.allocator);
 

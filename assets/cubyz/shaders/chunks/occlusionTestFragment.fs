@@ -12,9 +12,11 @@ struct ChunkData {
 	int voxelSize;
 	uint vertexStartOpaque;
 	uint lightStartOpaque;
+	uint textureStartOpaque;
 	uint faceCountsByNormalOpaque[7];
 	uint vertexStartTransparent;
 	uint lightStartTransparent;
+	uint textureStartTransparent;
 	uint vertexCountTransparent;
 	uint visibilityState;
 	uint oldVisibilityState;

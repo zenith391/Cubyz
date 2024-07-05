@@ -37,6 +37,15 @@ pub const Neighbors = struct { // TODO: Should this be an enum?
 	pub const relY = [_]i32 {0, 0, 0, 0, 1, -1};
 	/// Index to relative position
 	pub const relZ = [_]i32 {1, -1, 0, 0, 0, 0};
+	/// Index to relative position vector
+	pub const relVec = [_]Vec3i {
+		.{0, 0, 1},
+		.{0, 0, -1},
+		.{1, 0, 0},
+		.{-1, 0, 0},
+		.{0, 1, 0},
+		.{0, -1, 0},
+	};
 	/// Index to bitMask for bitmap direction data
 	pub const bitMask = [_]u6 {0x01, 0x02, 0x04, 0x08, 0x10, 0x20};
 	/// To iterate over all neighbors easily
