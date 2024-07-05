@@ -99,8 +99,8 @@ void main() {
 	int encodedPosition = faceData[faceID].encodedPosition;
 	int textureAndQuad = faceData[faceID].textureAndQuad;
 	uvec2 quadSize = uvec2(
-		encodedPosition >> 15 & 31,
-		encodedPosition >> 20 & 31
+		(encodedPosition >> 15 & 31) + 1,
+		(encodedPosition >> 20 & 31) + 1
 	);
 	lightBufferIndex = (transparent ? chunks[chunkID].lightStartTransparent : chunks[chunkID].lightStartOpaque) + faceData[faceID].lightBufferIndex;
 	lightArea = quadSize + uvec2(1, 1);

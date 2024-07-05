@@ -26,8 +26,9 @@ const ExtraQuadInfo = struct {
 	isFullQuad: bool,
 	hasOnlyCornerVertices: bool,
 	alignedNormalDirection: ?u3,
-	greedyMeshableInX: bool,
-	greedyMeshableInY: bool,
+	greedyMeshable: bool,
+	greedyMeshingXDir: ?u3,
+	greedyMeshingYDir: ?u3,
 };
 
 const gridSize = 4096;
@@ -229,25 +230,32 @@ pub const greedyMeshableQuads: u16 = 6;
 
 var quadDeduplication: std.AutoHashMap([@sizeOf(QuadInfo)]u8, u16) = undefined;
 
-fn isLineGreedyMeshable(corner0: Vec3f, corner1: Vec3f, corner0UV: Vec2f, corner1UV: Vec2f) bool {
+fn getLineGreedyMeshingDir(corner0: Vec3f, corner1: Vec3f, corner0UV: Vec2f, corner1UV: Vec2f) ?u3 {
 	// One component must wrap around, while the other 2 compoenents must be equal:
 	const equalComponents: u3 = @bitCast(corner0 != corner1);
-	if(@popCount(equalComponents) != 1) return false;
+	if(@popCount(equalComponents) != 1) return null;
 	const index = @ctz(equalComponents);
 	const component0 = @as([3]f32, @bitCast(corner0))[index];
 	const component1 = @as([3]f32, @bitCast(corner1))[index];
 	if((component0 == 0 and component1 == 1) or (component0 == 1 and component1 == 0)) {
 		// Same for the uvs:
 		const equalComponentsUV: u2 = @bitCast(corner0UV != corner1UV);
-		if(@popCount(equalComponentsUV) != 1) return false;
+		if(@popCount(equalComponentsUV) != 1) return null;
 		const indexUV = @ctz(equalComponentsUV);
 		const component0UV = @as([2]f32, @bitCast(corner0UV))[indexUV];
 		const component1UV = @as([2]f32, @bitCast(corner1UV))[indexUV];
 		if((component0UV == 0 and component1UV == 1) or (component0UV == 1 and component1UV == 0)) {
-			return true;
+			var dir = switch (index) {
+				0 => chunk.Neighbors.dirNegX,
+				1 => chunk.Neighbors.dirNegY,
+				2 => chunk.Neighbors.dirDown,
+				else => unreachable,
+			};
+			if(component0 < component1) dir ^= 1;
+			return dir;
 		}
 	}
-	return false;
+	return null;
 }
 
 fn addQuad(info: QuadInfo) error{Degenerate}!u16 {
@@ -289,8 +297,23 @@ fn addQuad(info: QuadInfo) error{Degenerate}!u16 {
 		if(@reduce(.And, info.normal == Vec3f{0, 0, 1})) extraQuadInfo.alignedNormalDirection = chunk.Neighbors.dirUp;
 	}
 	{
-		extraQuadInfo.greedyMeshableInX = isLineGreedyMeshable(info.corners[0], info.corners[2], info.cornerUV[0], info.cornerUV[2]) and isLineGreedyMeshable(info.corners[1], info.corners[3], info.cornerUV[1], info.cornerUV[3]);
-		extraQuadInfo.greedyMeshableInY = isLineGreedyMeshable(info.corners[0], info.corners[1], info.cornerUV[0], info.cornerUV[1]) and isLineGreedyMeshable(info.corners[2], info.corners[3], info.cornerUV[2], info.cornerUV[3]);
+		extraQuadInfo.greedyMeshingXDir = null;
+		extraQuadInfo.greedyMeshingYDir = null;
+		if(getLineGreedyMeshingDir(info.corners[0], info.corners[2], info.cornerUV[0], info.cornerUV[2])) |dir1| {
+			if(getLineGreedyMeshingDir(info.corners[1], info.corners[3], info.cornerUV[1], info.cornerUV[3])) |dir2| {
+				if(dir1 == dir2) {
+					extraQuadInfo.greedyMeshingXDir = dir1;
+				}
+			}
+		}
+		if(getLineGreedyMeshingDir(info.corners[0], info.corners[1], info.cornerUV[0], info.cornerUV[1])) |dir1| {
+			if(getLineGreedyMeshingDir(info.corners[2], info.corners[3], info.cornerUV[2], info.cornerUV[3])) |dir2| {
+				if(dir1 == dir2) {
+					extraQuadInfo.greedyMeshingYDir = dir1;
+				}
+			}
+		}
+		extraQuadInfo.greedyMeshable = extraQuadInfo.greedyMeshingXDir != null or extraQuadInfo.greedyMeshingYDir != null;
 	}
 
 	extraQuadInfos.append(extraQuadInfo);
