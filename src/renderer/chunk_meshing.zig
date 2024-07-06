@@ -24,6 +24,7 @@ const gpu_performance_measuring = main.gui.windowlist.gpu_performance_measuring;
 
 const mesh_storage = @import("mesh_storage.zig");
 
+var depthPrepassShader: Shader = undefined;
 var shader: Shader = undefined;
 var transparentShader: Shader = undefined;
 const UniformStruct = struct {
@@ -45,6 +46,7 @@ const UniformStruct = struct {
 	zFar: c_int,
 	transparent: c_int,
 };
+pub var depthPrepassUniforms: UniformStruct = undefined;
 pub var uniforms: UniformStruct = undefined;
 pub var transparentUniforms: UniformStruct = undefined;
 pub var commandShader: Shader = undefined;
@@ -77,6 +79,7 @@ pub var transparentQuadsDrawn: usize = 0;
 
 pub fn init() void {
 	lighting.init();
+	depthPrepassShader = Shader.initAndGetUniforms("assets/cubyz/shaders/chunks/chunk_vertex.vs", "assets/cubyz/shaders/chunks/depth_prepass_fragment.fs", &depthPrepassUniforms);
 	shader = Shader.initAndGetUniforms("assets/cubyz/shaders/chunks/chunk_vertex.vs", "assets/cubyz/shaders/chunks/chunk_fragment.fs", &uniforms);
 	transparentShader = Shader.initAndGetUniforms("assets/cubyz/shaders/chunks/chunk_vertex.vs", "assets/cubyz/shaders/chunks/transparent_fragment.fs", &transparentUniforms);
 	commandShader = Shader.initComputeAndGetUniforms("assets/cubyz/shaders/chunks/fillIndirectBuffer.glsl", &commandUniforms);
@@ -106,6 +109,7 @@ pub fn init() void {
 
 pub fn deinit() void {
 	lighting.deinit();
+	depthPrepassShader.deinit();
 	shader.deinit();
 	transparentShader.deinit();
 	commandShader.deinit();
@@ -160,6 +164,15 @@ fn bindCommonUniforms(locations: *UniformStruct, projMatrix: Mat4f, ambient: Vec
 	c.glUniform3f(locations.playerPositionFraction, @floatCast(@mod(playerPos[0], 1)), @floatCast(@mod(playerPos[1], 1)), @floatCast(@mod(playerPos[2], 1)));
 }
 
+pub fn bindPrepassShaderAndUniforms(projMatrix: Mat4f, ambient: Vec3f, playerPos: Vec3d) void {
+	depthPrepassShader.bind();
+
+	bindCommonUniforms(&depthPrepassUniforms, projMatrix, ambient, playerPos);
+	c.glUniform1i(depthPrepassUniforms.transparent, 0);
+
+	c.glBindVertexArray(vao);
+}
+
 pub fn bindShaderAndUniforms(projMatrix: Mat4f, ambient: Vec3f, playerPos: Vec3d) void {
 	shader.bind();
 
@@ -195,7 +208,7 @@ pub fn drawChunksIndirect(chunkIDs: []const u32, projMatrix: Mat4f, ambient: Vec
 	c.glUniform1i(commandUniforms.isTransparent, @intFromBool(transparent));
 	c.glUniform3i(commandUniforms.playerPositionInteger, @intFromFloat(@floor(playerPos[0])), @intFromFloat(@floor(playerPos[1])), @intFromFloat(@floor(playerPos[2])));
 	if(!transparent) {
-		gpu_performance_measuring.startQuery(.chunk_rendering_previous_visible);
+		gpu_performance_measuring.startQuery(.chunk_rendering_depth_prepass_previous_visible);
 		c.glUniform1i(commandUniforms.onlyDrawPreviouslyInvisible, 0);
 		c.glDispatchCompute(@intCast(@divFloor(chunkIDs.len + 63, 64)), 1, 1); // TODO: Replace with @divCeil once available
 		c.glMemoryBarrier(c.GL_SHADER_STORAGE_BARRIER_BIT | c.GL_COMMAND_BARRIER_BIT);
@@ -203,7 +216,8 @@ pub fn drawChunksIndirect(chunkIDs: []const u32, projMatrix: Mat4f, ambient: Vec
 		if(transparent) {
 			bindTransparentShaderAndUniforms(projMatrix, ambient, playerPos);
 		} else {
-			bindShaderAndUniforms(projMatrix, ambient, playerPos);
+			bindPrepassShaderAndUniforms(projMatrix, ambient, playerPos);
+			c.glColorMask(c.GL_FALSE, c.GL_FALSE, c.GL_FALSE, c.GL_FALSE);
 		}
 		c.glBindBuffer(c.GL_DRAW_INDIRECT_BUFFER, commandBuffer.ssbo.bufferID);
 		c.glMultiDrawElementsIndirect(c.GL_TRIANGLES, c.GL_UNSIGNED_INT, @ptrFromInt(allocation.start*@sizeOf(IndirectData)), drawCallsEstimate, 0);
@@ -220,14 +234,18 @@ pub fn drawChunksIndirect(chunkIDs: []const u32, projMatrix: Mat4f, ambient: Vec
 	c.glDepthMask(c.GL_FALSE);
 	c.glColorMask(c.GL_FALSE, c.GL_FALSE, c.GL_FALSE, c.GL_FALSE);
 	c.glBindVertexArray(vao);
+	var oldDepthFunc: c_uint = undefined;
+	c.glGetIntegerv(c.GL_DEPTH_FUNC, @ptrCast(&oldDepthFunc));
+	c.glDepthFunc(c.GL_LEQUAL);
 	c.glDrawElementsBaseVertex(c.GL_TRIANGLES, @intCast(6*6*chunkIDs.len), c.GL_UNSIGNED_INT, null, chunkIDAllocation.start*24);
+	c.glDepthFunc(oldDepthFunc);
 	c.glDepthMask(c.GL_TRUE);
 	c.glColorMask(c.GL_TRUE, c.GL_TRUE, c.GL_TRUE, c.GL_TRUE);
 	c.glMemoryBarrier(c.GL_SHADER_STORAGE_BARRIER_BIT);
 	gpu_performance_measuring.stopQuery();
 
 	// Draw again:
-	gpu_performance_measuring.startQuery(if(transparent) .transparent_rendering else .chunk_rendering_new_visible);
+	gpu_performance_measuring.startQuery(if(transparent) .transparent_rendering else .chunk_rendering_depth_prepass_new_visible);
 	commandShader.bind();
 	c.glUniform1i(commandUniforms.onlyDrawPreviouslyInvisible, 1);
 	c.glDispatchCompute(@intCast(@divFloor(chunkIDs.len + 63, 64)), 1, 1); // TODO: Replace with @divCeil once available
@@ -237,11 +255,31 @@ pub fn drawChunksIndirect(chunkIDs: []const u32, projMatrix: Mat4f, ambient: Vec
 		bindTransparentShaderAndUniforms(projMatrix, ambient, playerPos);
 		c.glDepthMask(c.GL_FALSE);
 	} else {
-		bindShaderAndUniforms(projMatrix, ambient, playerPos);
+		bindPrepassShaderAndUniforms(projMatrix, ambient, playerPos);
+		c.glColorMask(c.GL_FALSE, c.GL_FALSE, c.GL_FALSE, c.GL_FALSE);
 	}
 	c.glBindBuffer(c.GL_DRAW_INDIRECT_BUFFER, commandBuffer.ssbo.bufferID);
 	c.glMultiDrawElementsIndirect(c.GL_TRIANGLES, c.GL_UNSIGNED_INT, @ptrFromInt(allocation.start*@sizeOf(IndirectData)), drawCallsEstimate, 0);
 	gpu_performance_measuring.stopQuery();
+
+	if(!transparent) {
+		gpu_performance_measuring.startQuery(.chunk_rendering);
+		// Draw after the depth prepass
+		commandShader.bind();
+		c.glUniform1i(commandUniforms.onlyDrawPreviouslyInvisible, 0);
+		c.glDispatchCompute(@intCast(@divFloor(chunkIDs.len + 63, 64)), 1, 1); // TODO: Replace with @divCeil once available
+		c.glMemoryBarrier(c.GL_SHADER_STORAGE_BARRIER_BIT | c.GL_COMMAND_BARRIER_BIT);
+
+		bindShaderAndUniforms(projMatrix, ambient, playerPos);
+		c.glDepthFunc(c.GL_EQUAL);
+		c.glDepthMask(c.GL_FALSE);
+		c.glColorMask(c.GL_TRUE, c.GL_TRUE, c.GL_TRUE, c.GL_TRUE);
+		c.glBindBuffer(c.GL_DRAW_INDIRECT_BUFFER, commandBuffer.ssbo.bufferID);
+		c.glMultiDrawElementsIndirect(c.GL_TRIANGLES, c.GL_UNSIGNED_INT, @ptrFromInt(allocation.start*@sizeOf(IndirectData)), drawCallsEstimate, 0);
+		c.glDepthFunc(c.GL_LESS);
+		c.glDepthMask(c.GL_TRUE);
+		gpu_performance_measuring.stopQuery();
+	}
 }
 
 pub const FaceData = extern struct {
@@ -430,9 +468,20 @@ const PrimitiveMesh = struct {
 				@floatFromInt(face.position.y),
 				@floatFromInt(face.position.z),
 			};
-			for(main.models.quads.items[face.blockAndQuad.quadIndex].corners) |cornerPos| {
-				self.min = @min(self.min, basePos + cornerPos);
-				self.max = @max(self.max, basePos + cornerPos);
+
+			for(0..2) |x| {
+				for(0..2) |y| {
+					const quadIndex = face.blockAndQuad.quadIndex;
+					var vertexPos = models.quads.items[quadIndex].corners[0];
+					vertexPos += (models.quads.items[quadIndex].corners[2] - models.quads.items[quadIndex].corners[0])*@as(Vec3f, @splat(@floatFromInt(x*(face.position.xSizeMinusOne + 1))));
+					if(x != 0) {
+						vertexPos += (models.quads.items[quadIndex].corners[3] - models.quads.items[quadIndex].corners[2])*@as(Vec3f, @splat(@floatFromInt(y*(face.position.ySizeMinusOne + 1))));
+					} else {
+						vertexPos += (models.quads.items[quadIndex].corners[1] - models.quads.items[quadIndex].corners[0])*@as(Vec3f, @splat(@floatFromInt(y*(face.position.ySizeMinusOne + 1))));
+					}
+					self.min = @min(self.min, basePos + vertexPos);
+					self.max = @max(self.max, basePos + vertexPos);
+				}
 			}
 		}
 		parent.lightingData[0].lock.unlockRead();
