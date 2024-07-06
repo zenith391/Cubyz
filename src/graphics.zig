@@ -1298,7 +1298,7 @@ pub const SubAllocation = struct {
 };
 
 /// A big SSBO that is able to allocate/free smaller regions.
-pub fn LargeBuffer(comptime Entry: type) type {
+pub fn LargeBuffer(comptime _Entry: type) type {
 	return struct {
 		ssbo: SSBO,
 		freeBlocks: main.List(SubAllocation),
@@ -1310,6 +1310,8 @@ pub fn LargeBuffer(comptime Entry: type) type {
 		binding: c_uint,
 
 		const Self = @This();
+
+		pub const Entry = _Entry;
 
 		fn createBuffer(self: *Self, size: u31) void {
 			self.ssbo = SSBO.init();

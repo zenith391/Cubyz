@@ -22,6 +22,18 @@ pub var window = GuiWindow {
 	.hideIfMouseIsGrabbed = false,
 };
 
+fn renderLargeBufferSize(buffer: anytype, comptime fmt: []const u8, y: f32) void {
+	const dataSize: usize = @sizeOf(@TypeOf(buffer).Entry);
+	const size: usize = buffer.capacity*dataSize;
+	const used: usize = buffer.used*dataSize;
+	var largestFreeBlock: usize = 0;
+	for(buffer.freeBlocks.items) |freeBlock| {
+		largestFreeBlock = @max(largestFreeBlock, freeBlock.len);
+	}
+	const fragmentation = size - used - largestFreeBlock*dataSize;
+	draw.print(fmt, .{used >> 20, size >> 20, fragmentation >> 20}, 0, y, 8, .left);
+}
+
 pub fn render() void {
 	draw.setColor(0xffffffff);
 	var y: f32 = 0;
@@ -47,18 +59,12 @@ pub fn render() void {
 		y += 8;
 		draw.print("Mesh Queue size: {}", .{main.renderer.mesh_storage.updatableList.items.len}, 0, y, 8, .left);
 		y += 8;
-		{
-			const faceDataSize: usize = @sizeOf(main.renderer.chunk_meshing.FaceData);
-			const size: usize = main.renderer.chunk_meshing.faceBuffer.capacity*faceDataSize;
-			const used: usize = main.renderer.chunk_meshing.faceBuffer.used*faceDataSize;
-			var largestFreeBlock: usize = 0;
-			for(main.renderer.chunk_meshing.faceBuffer.freeBlocks.items) |freeBlock| {
-				largestFreeBlock = @max(largestFreeBlock, freeBlock.len);
-			}
-			const fragmentation = size - used - largestFreeBlock*faceDataSize;
-			draw.print("ChunkMesh memory: {} MiB / {} MiB (fragmentation: {} MiB)", .{used >> 20, size >> 20, fragmentation >> 20}, 0, y, 8, .left);
-			y += 8;
-		}
+		renderLargeBufferSize(main.renderer.chunk_meshing.faceBuffer, "ChunkMesh memory: {} MiB / {} MiB (fragmentation: {} MiB)", y);
+		y += 8;
+		renderLargeBufferSize(main.renderer.chunk_meshing.lightBuffer, "ChunkMesh light memory: {} MiB / {} MiB (fragmentation: {} MiB)", y);
+		y += 8;
+		renderLargeBufferSize(main.renderer.chunk_meshing.textureBuffer, "ChunkMesh texture memory: {} MiB / {} MiB (fragmentation: {} MiB)", y);
+		y += 8;
 		draw.print("Biome: {s}", .{main.game.world.?.playerBiome.load(.monotonic).id}, 0, y, 8, .left);
 		y += 8;
 		draw.print("Opaque faces: {}, Transparent faces: {}", .{main.renderer.chunk_meshing.quadsDrawn, main.renderer.chunk_meshing.transparentQuadsDrawn}, 0, y, 8, .left);
