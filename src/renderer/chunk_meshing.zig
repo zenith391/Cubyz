@@ -473,11 +473,11 @@ const PrimitiveMesh = struct {
 				for(0..2) |y| {
 					const quadIndex = face.blockAndQuad.quadIndex;
 					var vertexPos = models.quads.items[quadIndex].corners[0];
-					vertexPos += (models.quads.items[quadIndex].corners[2] - models.quads.items[quadIndex].corners[0])*@as(Vec3f, @splat(@floatFromInt(x*(face.position.xSizeMinusOne + 1))));
+					vertexPos += (models.quads.items[quadIndex].corners[2] - models.quads.items[quadIndex].corners[0])*@as(Vec3f, @splat(@floatFromInt(x*(xLightSize - 1))));
 					if(x != 0) {
-						vertexPos += (models.quads.items[quadIndex].corners[3] - models.quads.items[quadIndex].corners[2])*@as(Vec3f, @splat(@floatFromInt(y*(face.position.ySizeMinusOne + 1))));
+						vertexPos += (models.quads.items[quadIndex].corners[3] - models.quads.items[quadIndex].corners[2])*@as(Vec3f, @splat(@floatFromInt(y*(yLightSize - 1))));
 					} else {
-						vertexPos += (models.quads.items[quadIndex].corners[1] - models.quads.items[quadIndex].corners[0])*@as(Vec3f, @splat(@floatFromInt(y*(face.position.ySizeMinusOne + 1))));
+						vertexPos += (models.quads.items[quadIndex].corners[1] - models.quads.items[quadIndex].corners[0])*@as(Vec3f, @splat(@floatFromInt(y*(yLightSize - 1))));
 					}
 					self.min = @min(self.min, basePos + vertexPos);
 					self.max = @max(self.max, basePos + vertexPos);

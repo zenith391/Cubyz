@@ -7,6 +7,7 @@ const main = @import("main.zig");
 const vec = @import("vec.zig");
 const Vec3i = vec.Vec3i;
 const Vec3f = vec.Vec3f;
+const Vec2i = vec.Vec2i;
 const Vec2f = vec.Vec2f;
 const Mat4f = vec.Mat4f;
 const FaceData = main.renderer.chunk_meshing.FaceData;
@@ -18,6 +19,12 @@ pub const QuadInfo = extern struct {
 	normal: Vec3f,
 	corners: [4]Vec3f,
 	cornerUV: [4]Vec2f,
+	textureSlot: u32,
+};
+pub const HashableQuadInfo = extern struct {
+	normal: Vec3i,
+	corners: [4]Vec3i,
+	cornerUV: [4]Vec2i,
 	textureSlot: u32,
 };
 
@@ -214,7 +221,7 @@ pub var models: main.List(Model) = undefined;
 pub var fullCube: u16 = undefined;
 pub const greedyMeshableQuads: u16 = 6;
 
-var quadDeduplication: std.AutoHashMap([@sizeOf(QuadInfo) + 1]u8, u16) = undefined;
+var quadDeduplication: std.AutoHashMap(struct{HashableQuadInfo, bool}, u16) = undefined;
 
 fn getLineGreedyMeshingDir(corner0: Vec3f, corner1: Vec3f, corner0UV: Vec2f, corner1UV: Vec2f) ?u3 {
 	// One component must wrap around, while the other 2 compoenents must be equal:
@@ -245,7 +252,7 @@ fn getLineGreedyMeshingDir(corner0: Vec3f, corner1: Vec3f, corner0UV: Vec2f, cor
 }
 
 fn addQuad(info: QuadInfo, offsetByNormal: bool) error{Degenerate}!u16 {
-	if(quadDeduplication.get(std.mem.toBytes(info) ++ .{@intFromBool(offsetByNormal)})) |id| {
+	if(quadDeduplication.get(.{@bitCast(info), offsetByNormal})) |id| {
 		return id;
 	}
 	// Check if it's degenerate:
@@ -258,7 +265,7 @@ fn addQuad(info: QuadInfo, offsetByNormal: bool) error{Degenerate}!u16 {
 	if(cornerEqualities >= 2) return error.Degenerate; // One corner equality is fine, since then the quad degenerates to a triangle, which has a non-zero area.
 	const index: u16 = @intCast(quads.items.len);
 	quads.append(info);
-	quadDeduplication.put(std.mem.toBytes(info) ++ .{@intFromBool(offsetByNormal)}, index) catch unreachable;
+	quadDeduplication.put(.{@bitCast(info), offsetByNormal}, index) catch unreachable;
 
 	var extraQuadInfo: ExtraQuadInfo = undefined;
 	extraQuadInfo.faceNeighbor = Model.getFaceNeighbor(&info);
@@ -372,7 +379,7 @@ pub fn init() void {
 	models = main.List(Model).init(main.globalAllocator);
 	quads = main.List(QuadInfo).init(main.globalAllocator);
 	extraQuadInfos = main.List(ExtraQuadInfo).init(main.globalAllocator);
-	quadDeduplication = std.AutoHashMap([@sizeOf(QuadInfo) + 1]u8, u16).init(main.globalAllocator.allocator);
+	quadDeduplication = @TypeOf(quadDeduplication).init(main.globalAllocator.allocator);
 
 	nameToIndex = std.StringHashMap(u16).init(main.globalAllocator.allocator);
 
