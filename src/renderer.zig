@@ -15,6 +15,7 @@ const Window = main.Window;
 const models = @import("models.zig");
 const network = @import("network.zig");
 const settings = @import("settings.zig");
+const camera = @import("camera.zig");
 const vec = @import("vec.zig");
 const gpu_performance_measuring = main.gui.windowlist.gpu_performance_measuring;
 const crosshair = main.gui.windowlist.crosshair;
@@ -121,8 +122,7 @@ pub fn updateViewport(width: u31, height: u31, fov: f32) void {
 	worldFrameBuffer.unbind();
 }
 
-pub fn render(playerPosition: Vec3d) void {
-	// TODO: player bobbing
+pub fn render() void {
 	if(game.world) |world| {
 		// TODO: Handle colors and sun position in the world.
 		var ambient: Vec3f = undefined;
@@ -132,7 +132,7 @@ pub fn render(playerPosition: Vec3d) void {
 		const skyColor = vec.xyz(world.clearColor);
 		game.fog.skyColor = skyColor;
 
-		renderWorld(world, ambient, skyColor, playerPosition);
+		renderWorld(world, ambient, skyColor);
 		const startTime = std.time.milliTimestamp();
 		mesh_storage.updateMeshes(startTime + maximumMeshTime);
 	} else {
@@ -164,26 +164,37 @@ pub fn crosshairDirection(rotationMatrix: Mat4f, fovY: f32, width: u31, height: 
 	return adjusted;
 }
 
-pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f, playerPos: Vec3d) void { // MARK: renderWorld()
+pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f) void { // MARK: renderWorld()
 	worldFrameBuffer.bind();
 	c.glViewport(0, 0, lastWidth, lastHeight);
 	gpu_performance_measuring.startQuery(.clear);
 	worldFrameBuffer.clear(Vec4f{skyColor[0], skyColor[1], skyColor[2], 1});
 	gpu_performance_measuring.stopQuery();
-	game.camera.updateViewMatrix();
+
+	// Get camera data before view bobbing is applied
+	camera.updateViewMatrix();
+	const lookMatrix = camera.viewMatrix;
+	const cameraPos = camera.position;
+
+	camera.ViewBobbing.apply();
+	defer camera.ViewBobbing.remove();
+	
+	const viewPos = camera.position;
+
+	// View matrix after view bobbing is applied
+	camera.updateViewMatrix();
 
 	// Uses FrustumCulling on the chunks.
-	const frustum = Frustum.init(Vec3f{0, 0, 0}, game.camera.viewMatrix, lastFov, lastWidth, lastHeight);
+	const frustum = Frustum.init(Vec3f{0, 0, 0}, camera.viewMatrix, lastFov, lastWidth, lastHeight);
 
 	const time: u32 = @intCast(std.time.milliTimestamp() & std.math.maxInt(u32));
 
 	gpu_performance_measuring.startQuery(.animation);
 	blocks.meshes.preProcessAnimationData(time);
 	gpu_performance_measuring.stopQuery();
-	
 
 	// Update the uniforms. The uniforms are needed to render the replacement meshes.
-	chunk_meshing.bindShaderAndUniforms(game.projectionMatrix, ambientLight, playerPos);
+	chunk_meshing.bindShaderAndUniforms(game.projectionMatrix, ambientLight, viewPos);
 
 	c.glActiveTexture(c.GL_TEXTURE0);
 	blocks.meshes.blockTextureArray.bind();
@@ -195,12 +206,12 @@ pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f, playerPo
 
 	chunk_meshing.quadsDrawn = 0;
 	chunk_meshing.transparentQuadsDrawn = 0;
-	const meshes = mesh_storage.updateAndGetRenderChunks(world.conn, &frustum, playerPos, settings.renderDistance);
+	const meshes = mesh_storage.updateAndGetRenderChunks(world.conn, &frustum, cameraPos, settings.renderDistance);
 
 	gpu_performance_measuring.startQuery(.chunk_rendering_preparation);
-	const direction = crosshairDirection(game.camera.viewMatrix, lastFov, lastWidth, lastHeight);
-	MeshSelection.select(playerPos, direction, game.Player.inventory.items[game.Player.selectedSlot]);
-	MeshSelection.render(game.projectionMatrix, game.camera.viewMatrix, playerPos);
+	const direction = crosshairDirection(lookMatrix, lastFov, lastWidth, lastHeight);
+	MeshSelection.select(cameraPos, direction, game.Player.inventory.items[game.Player.selectedSlot]);
+	MeshSelection.render(game.projectionMatrix, camera.viewMatrix, viewPos);
 
 	chunk_meshing.beginRender();
 
@@ -211,13 +222,13 @@ pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f, playerPo
 	}
 	gpu_performance_measuring.stopQuery();
 	if(chunkList.items.len != 0) {
-		chunk_meshing.drawChunksIndirect(chunkList.items, game.projectionMatrix, ambientLight, playerPos, false);
+		chunk_meshing.drawChunksIndirect(chunkList.items, game.projectionMatrix, ambientLight, viewPos, false);
 	}
 
 	gpu_performance_measuring.startQuery(.entity_rendering);
-	entity.ClientEntityManager.render(game.projectionMatrix, ambientLight, .{1, 0.5, 0.25}, playerPos);
+	entity.ClientEntityManager.render(game.projectionMatrix, ambientLight, .{1, 0.5, 0.25}, viewPos);
 
-	itemdrop.ItemDropRenderer.renderItemDrops(game.projectionMatrix, ambientLight, playerPos, time);
+	itemdrop.ItemDropRenderer.renderItemDrops(game.projectionMatrix, ambientLight, viewPos, time);
 	gpu_performance_measuring.stopQuery();
 
 	// Render transparent chunk meshes:
@@ -236,11 +247,11 @@ pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f, playerPo
 		while(true) {
 			if(i == 0) break;
 			i -= 1;
-			meshes[i].prepareTransparentRendering(playerPos, &chunkList);
+			meshes[i].prepareTransparentRendering(viewPos, &chunkList);
 		}
 		gpu_performance_measuring.stopQuery();
 		if(chunkList.items.len != 0) {
-			chunk_meshing.drawChunksIndirect(chunkList.items, game.projectionMatrix, ambientLight, playerPos, true);
+			chunk_meshing.drawChunksIndirect(chunkList.items, game.projectionMatrix, ambientLight, viewPos, true);
 		}
 	}
 	c.glDepthMask(c.GL_TRUE);
@@ -250,7 +261,7 @@ pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f, playerPo
 
 	worldFrameBuffer.bindTexture(c.GL_TEXTURE3);
 
-	const playerBlock = mesh_storage.getBlockFromAnyLod(@intFromFloat(@floor(playerPos[0])), @intFromFloat(@floor(playerPos[1])), @intFromFloat(@floor(playerPos[2])));
+	const playerBlock = mesh_storage.getBlockFromAnyLod(@intFromFloat(@floor(cameraPos[0])), @intFromFloat(@floor(cameraPos[1])), @intFromFloat(@floor(cameraPos[2])));
 	
 	if(settings.bloom) {
 		Bloom.render(lastWidth, lastHeight, playerBlock);
@@ -286,7 +297,7 @@ pub fn renderWorld(world: *World, ambientLight: Vec3f, skyColor: Vec3f, playerPo
 
 	c.glBindFramebuffer(c.GL_FRAMEBUFFER, 0);
 
-	entity.ClientEntityManager.renderNames(game.projectionMatrix, playerPos);
+	entity.ClientEntityManager.renderNames(game.projectionMatrix, viewPos);
 	gpu_performance_measuring.stopQuery();
 }
 
@@ -539,8 +550,12 @@ pub const MenuBackGround = struct {
 		activeFrameBuffer = buffer.frameBuffer;
 		defer activeFrameBuffer = 0;
 
-		const oldRotation = game.camera.rotation;
-		defer game.camera.rotation = oldRotation;
+		const oldRotation = camera.rotation;
+		defer camera.rotation = oldRotation;
+
+		const oldViewBobEnabled = camera.ViewBobbing.enabled;
+		defer camera.ViewBobbing.enabled = oldViewBobEnabled;
+		camera.ViewBobbing.enabled = false;
 
 		const angles = [_]f32 {std.math.pi/2.0, std.math.pi, std.math.pi*3/2.0, std.math.pi*2};
 
@@ -551,11 +566,11 @@ pub const MenuBackGround = struct {
 		for(0..4) |i| {
 			c.glEnable(c.GL_CULL_FACE);
 			c.glEnable(c.GL_DEPTH_TEST);
-			game.camera.rotation = .{0, 0, angles[i]};
+			camera.rotation = .{0, 0, angles[i]};
 			// Draw to frame buffer.
 			buffer.bind();
 			c.glClear(c.GL_DEPTH_BUFFER_BIT | c.GL_STENCIL_BUFFER_BIT | c.GL_COLOR_BUFFER_BIT);
-			main.renderer.render(game.Player.getEyePosBlocking());
+			main.renderer.render();
 			// Copy the pixels directly from OpenGL
 			buffer.bind();
 			c.glReadPixels(0, 0, size, size, c.GL_RGBA, c.GL_UNSIGNED_BYTE, pixels.ptr);

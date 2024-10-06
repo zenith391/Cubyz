@@ -23,28 +23,7 @@ const models = main.models;
 const Fog = graphics.Fog;
 const renderer = @import("renderer.zig");
 const settings = @import("settings.zig");
-
-pub const camera = struct { // MARK: camera
-	pub var rotation: Vec3f = Vec3f{0, 0, 0};
-	pub var direction: Vec3f = Vec3f{0, 0, 0};
-	pub var viewMatrix: Mat4f = Mat4f.identity();
-	pub fn moveRotation(mouseX: f32, mouseY: f32) void {
-		// Mouse movement along the y-axis rotates the image along the x-axis.
-		rotation[0] += mouseY;
-		if(rotation[0] > std.math.pi/2.0) {
-			rotation[0] = std.math.pi/2.0;
-		} else if(rotation[0] < -std.math.pi/2.0) {
-			rotation[0] = -std.math.pi/2.0;
-		}
-		// Mouse movement along the x-axis rotates the image along the z-axis.
-		rotation[2] += mouseX;
-	}
-
-	pub fn updateViewMatrix() void {
-		direction = vec.rotateZ(vec.rotateX(Vec3f{0, 1, 0}, -rotation[0]), -rotation[2]);
-		viewMatrix = Mat4f.identity().mul(Mat4f.rotationX(rotation[0])).mul(Mat4f.rotationZ(rotation[2]));
-	}
-};
+const camera = @import("camera.zig");
 
 pub const collision = struct {
 	pub fn triangleAABB(triangle: [3]Vec3d, box_center: Vec3d, box_extents: Vec3d) bool {
@@ -349,7 +328,7 @@ pub const Player = struct { // MARK: Player
 		.min = -outerBoundingBoxExtent,
 		.max = outerBoundingBoxExtent,
 	};
-	const eyeBox: collision.Box = .{
+	pub const eyeBox: collision.Box = .{
 		.min = -Vec3d{outerBoundingBoxExtent[0]*0.2, outerBoundingBoxExtent[1]*0.2, 0.6},
 		.max = Vec3d{outerBoundingBoxExtent[0]*0.2, outerBoundingBoxExtent[1]*0.2, 0.9 - 0.05},
 	};
@@ -937,11 +916,15 @@ pub fn update(deltaTime: f64) void { // MARK: update()
 
 	} else {
 		Player.super.pos += move;
+		Player.onGround = false;
 	}
 
 	// Clamp the eyePosition and subtract eye coyote time.
 	Player.eyePos = @max(Player.eyeBox.min, @min(Player.eyePos, Player.eyeBox.max));
 	Player.eyeCoyote -= deltaTime;
+
+	camera.ViewBobbing.update(deltaTime);
+	camera.position = Player.getEyePosBlocking();
 
 	const biome = world.?.playerBiome.load(.monotonic);
 

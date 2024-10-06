@@ -20,6 +20,7 @@ pub const random = @import("random.zig");
 pub const renderer = @import("renderer.zig");
 pub const rotation = @import("rotation.zig");
 pub const settings = @import("settings.zig");
+pub const camera = @import("camera.zig");
 pub const utils = @import("utils.zig");
 pub const vec = @import("vec.zig");
 pub const ZonElement = @import("zon.zig").ZonElement;
@@ -630,7 +631,7 @@ pub fn main() void { // MARK: main()
 		if(!isHidden) {
 			c.glEnable(c.GL_CULL_FACE);
 			c.glEnable(c.GL_DEPTH_TEST);
-			renderer.render(game.Player.getEyePosBlocking());
+			renderer.render();
 			// Render the GUI
 			gui.windowlist.gpu_performance_measuring.startQuery(.gui);
 			c.glDisable(c.GL_CULL_FACE);
