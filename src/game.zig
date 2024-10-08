@@ -704,35 +704,33 @@ pub fn update(deltaTime: f64) void { // MARK: update()
 		const right = Vec3d{-forward[1], forward[0], 0};
 		var movementDir: Vec3d = .{0, 0, 0};
 		var movementSpeed: f64 = 0;
-		if(main.Window.grabbed) {
-			if(KeyBoard.key("forward").pressed) {
-				if(KeyBoard.key("sprint").pressed) {
-					if(Player.isGhost.load(.monotonic)) {
-						movementSpeed = @max(movementSpeed, 128);
-						movementDir += forward*@as(Vec3d, @splat(128));
-					} else if(Player.isFlying.load(.monotonic)) {
-						movementSpeed = @max(movementSpeed, 32);
-						movementDir += forward*@as(Vec3d, @splat(32));
-					} else {
-						movementSpeed = @max(movementSpeed, 8);
-						movementDir += forward*@as(Vec3d, @splat(8));
-					}
+		if(KeyBoard.key("sprint").pressed) {
+			if(Player.isGhost.load(.monotonic)) {
+				movementSpeed = @max(movementSpeed, 128);
+			} else if(Player.isFlying.load(.monotonic)) {
+				movementSpeed = @max(movementSpeed, 32);
+			} else {
+				if(KeyBoard.key("forward").pressed) {
+					movementSpeed = @max(movementSpeed, 8);
 				} else {
 					movementSpeed = @max(movementSpeed, 4);
-					movementDir += forward*@as(Vec3d, @splat(4));
 				}
 			}
+		} else {
+			movementSpeed = @max(movementSpeed, 4);
+		}
+		if(main.Window.grabbed) {
+			if(KeyBoard.key("forward").pressed) {
+				movementDir += forward*@as(Vec3d, @splat(movementSpeed));
+			}
 			if(KeyBoard.key("backward").pressed) {
-				movementSpeed = @max(movementSpeed, 4);
-				movementDir += forward*@as(Vec3d, @splat(-4));
+				movementDir += forward*@as(Vec3d, @splat(-movementSpeed));
 			}
 			if(KeyBoard.key("left").pressed) {
-				movementSpeed = @max(movementSpeed, 4);
-				movementDir += right*@as(Vec3d, @splat(4));
+				movementDir += right*@as(Vec3d, @splat(movementSpeed));
 			}
 			if(KeyBoard.key("right").pressed) {
-				movementSpeed = @max(movementSpeed, 4);
-				movementDir += right*@as(Vec3d, @splat(-4));
+				movementDir += right*@as(Vec3d, @splat(-movementSpeed));
 			}
 			if(KeyBoard.key("jump").pressed) {
 				if(Player.isFlying.load(.monotonic)) {
