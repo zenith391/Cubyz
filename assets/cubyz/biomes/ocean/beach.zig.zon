@@ -1,18 +1,15 @@
 .{
 	.properties = .{
 		.ocean,
+		.wet,
 	},
-	.radius = 500,
-	.minHeight = 5,
-	.maxHeight = 7,
+	.minHeight = 2,
+	.maxHeight = 2,
 	.chance = 0,
-
+	.roughness = 1,
 	.interpolation = .linear,
-	
-	.hills = 5,
-
+	.hills = 1,
 	.music = "cubyz:tides",
-	
 	.ground_structure = .{
 		"2 to 4 cubyz:sand",
 	},

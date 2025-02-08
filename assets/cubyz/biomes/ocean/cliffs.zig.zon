@@ -1,0 +1,27 @@
+.{
+	.properties = .{
+		.wet,
+		.barren,
+	},
+	.radius = 80,
+	.minHeight = 0,
+	.maxHeight = 0,
+	.chance = 0,
+	.mountains = 75,
+	.roughness = 15,
+	.ground_structure = .{
+		"0 to 1 cubyz:gravel",
+		"0 to 1 cubyz:cobblestone",
+	},
+	.structures = .{
+		.{
+			.id = "cubyz:ground_patch",
+			.block = "cubyz:mossy_cobblestone",
+			.chance = 0.05,
+			.width = 12,
+			.variation = 6,
+			.depth = 3,
+			.smoothness = 0.1,
+		},
+	},
+}
